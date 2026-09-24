@@ -1,0 +1,10 @@
+data/
+*.mat
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+mlruns/
+mlflow.db
+.venv/
+*.egg-info/
+.DS_Store

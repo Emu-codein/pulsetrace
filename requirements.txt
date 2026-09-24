@@ -1,0 +1,12 @@
+pandas
+numpy
+scipy
+scikit-learn
+xgboost
+shap
+mlflow
+matplotlib
+kaggle
+h5py
+ipykernel
+
