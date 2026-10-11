@@ -10,3 +10,4 @@ kaggle
 h5py
 ipykernel
 
+pyarrow
