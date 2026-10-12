@@ -1,10 +1,21 @@
-from scipy.signal import find_peaks
+from scipy.signal import butter, find_peaks, sosfiltfilt
 import numpy as np
 import scipy.io
 
-def get_bpm(record, fs= 125, distance=40):
+def bandpass(x, fs=125, low=0.5, high=8.0, order=3):
+    """Zero-phase bandpass. HR is 0.5-3 Hz; up to 8 Hz keeps the beat shape.
+
+    sosfiltfilt runs the filter forwards then backwards, so there is no time
+    delay (a delay would bias PTT against the ECG later).
+    """
+    sos = butter(order, [low, high], btype='band', fs=fs, output='sos')
+    return sosfiltfilt(sos, x)
+
+def get_bpm(record, fs= 125, distance=40, prominence=0.5):
     ppg = record[0]
-    peaks,_ = find_peaks(ppg, distance = distance)
+    # PPG is in arbitrary units, so z-score first: prominence is then in std units
+    z = (ppg - ppg.mean()) / (ppg.std() + 1e-9)
+    peaks,_ = find_peaks(z, distance = distance, prominence = prominence)
     n_peaks = len(peaks)
 
     if n_peaks < 2 :
@@ -45,7 +56,10 @@ def process_file(filepath, fs=125, distance=40, window_s=30):
 
     results = []
     for i in range(n_records):
-        record = p[0, i]
+        record = p[0, i].astype(float)
+        if record.shape[1] >= win:
+            # filter the whole record, then cut windows (no edge artefacts per window)
+            record[0] = bandpass(record[0], fs=fs)
         for w, start in enumerate(range(0, record.shape[1] - win + 1, win)):
             seg = record[:, start:start + win]
             bpm, n_peaks, hrv = get_bpm(seg, fs=fs, distance=distance)
