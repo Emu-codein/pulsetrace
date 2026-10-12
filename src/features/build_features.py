@@ -63,6 +63,47 @@ def get_ptt(ppg, ecg, fs=125, min_beats=15, lo=0.15, hi=0.7):
         return np.nan, np.nan, int(ok.sum())
     return np.median(foot_t[ok]), np.median(slope_t[ok]), int(ok.sum())
 
+MORPH_COLS = ['amp', 'rise_time', 'up_slope', 'width50', 'area_ratio', 'sqi', 'morph_n']
+
+def get_morphology(ppg, fs=125, min_beats=10, n_template=100):
+    """Per-beat PPG shape features (foot to foot), aggregated by window median.
+
+    amp        peak height above the foot, in window-std units (PPG units are arbitrary)
+    rise_time  foot -> peak, seconds
+    up_slope   steepest rise / amp, 1/s (shape only, independent of amplitude)
+    width50    time the pulse spends above half its height, seconds
+    area_ratio share of the pulse area before the peak (how front-loaded the beat is)
+    sqi        median correlation of each beat with the window's median beat
+               (template matching): ~1 clean, low = noisy or artefact
+    """
+    nan = dict.fromkeys(MORPH_COLS, np.nan)
+    zp = (ppg - ppg.mean()) / (ppg.std() + 1e-9)
+    feet, _ = find_peaks(-zp, distance=int(0.3 * fs), prominence=0.3)
+
+    feats, shapes = [], []
+    for f0, f1 in zip(feet[:-1], feet[1:]):
+        if not 0.3 <= (f1 - f0) / fs <= 1.5:
+            continue
+        beat = zp[f0:f1 + 1] - zp[f0]
+        pk = beat.argmax()
+        amp, area = beat[pk], beat.sum()
+        if amp <= 0 or pk == 0 or pk >= len(beat) - 1 or area <= 0:
+            continue
+        above = np.flatnonzero(beat >= amp / 2)
+        feats.append((amp, pk / fs, np.diff(beat[:pk + 1]).max() * fs / amp,
+                      (above[-1] - above[0]) / fs, beat[:pk + 1].sum() / area))
+        shapes.append(np.interp(np.linspace(0, 1, n_template),
+                                np.linspace(0, 1, len(beat)), beat / amp))
+
+    if len(feats) < min_beats:
+        return nan
+    shapes = np.array(shapes)
+    template = np.median(shapes, axis=0)
+    sqi = np.median([np.corrcoef(b, template)[0, 1] for b in shapes])
+    amp, rise, slope, width, ratio = np.median(feats, axis=0)
+    return dict(amp=amp, rise_time=rise, up_slope=slope, width50=width,
+                area_ratio=ratio, sqi=sqi, morph_n=len(feats))
+
 def get_bp_targets(abp, distance=40, prominence=10,
                    sbp_range=(60, 250), dbp_range=(30, 150), min_pp=20):
     """Median SBP/DBP for one ABP window; NaN if the window looks like garbage."""
@@ -103,6 +144,7 @@ def process_file(filepath, fs=125, distance=40, window_s=30):
             bpm, n_peaks, hrv = get_bpm(seg, fs=fs, distance=distance)
             systolic, diastolic = get_bp_targets(seg[1], distance=distance)
             ptt_foot, ptt_slope, ptt_n = get_ptt(seg[0], seg[2], fs=fs)
+            morph = get_morphology(seg[0], fs=fs)
             results.append({
                 'file': filepath,
                 'record_idx': i,
@@ -113,6 +155,7 @@ def process_file(filepath, fs=125, distance=40, window_s=30):
                 'ptt_foot': ptt_foot,
                 'ptt_slope': ptt_slope,
                 'ptt_n': ptt_n,
+                **morph,
                 'sys': systolic,
                 'dia': diastolic
             })
