@@ -9,6 +9,7 @@ matplotlib
 kaggle
 h5py
 ipykernel
-
 pyarrow
 pytest
+nbconvert
+jupytext
