@@ -31,3 +31,20 @@ def test_get_bp_targets_rejects_flatline_and_garbage():
     t = np.arange(0, 30, 1 / FS)
     low = 40 + 5 * np.sin(2 * np.pi * 1.2 * t)  # sys 45: out of range
     assert np.isnan(get_bp_targets(low)[0])
+
+
+def test_get_ptt_recovers_known_delay():
+    from src.features.build_features import get_ptt
+    n, fs, delay = 30 * FS, FS, 0.30
+    ecg, ppg = np.zeros(n), np.zeros(n)
+    t = np.arange(n) / fs
+    for r in np.arange(1.0, 29.0, 0.8):                 # R-peaks every 0.8 s
+        ecg[int(r * fs)] = 1.0
+        # asymmetric pulse: foot at r+delay, fast rise then slower fall
+        k = t - (r + delay)
+        ppg += np.where(k > 0, (k / 0.15) * np.exp(1 - k / 0.15), 0)
+    ecg = np.convolve(ecg, np.hanning(5), mode='same')
+    foot, slope, n_beats = get_ptt(ppg, ecg, fs=fs)
+    assert n_beats >= 15
+    assert abs(foot - delay) < 0.05
+    assert foot <= slope < foot + 0.15                  # steepest point is after the foot
