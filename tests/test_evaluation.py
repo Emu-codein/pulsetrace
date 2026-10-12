@@ -35,3 +35,34 @@ def test_report_perfect_prediction():
     y = np.array([[120., 80.], [140., 90.], [110., 70.]])
     rep = report(y, y, np.full_like(y, y.mean(axis=0)[0]))
     assert rep.loc['sys', 'mae'] == 0 and bool(rep.loc['sys', 'aami_pass'])
+
+
+def _preds(df, kind):
+    y = df[['sys', 'dia']].to_numpy()
+    if kind == 'perfect':
+        return y
+    means = df.groupby('record_id')[['sys', 'dia']].transform('mean').to_numpy()
+    return means  # knows who the patient is, tracks nothing inside a record
+
+
+def test_within_record_separates_patient_level_from_tracking():
+    from src.evaluation import within_record_report
+    df = _fake_df()
+    perfect = within_record_report(df, _preds(df, 'perfect'))
+    assert perfect.loc['sys', 'within_r2'] > 0.999 and perfect.loc['sys', 'between_r2'] > 0.999
+
+    level_only = within_record_report(df, _preds(df, 'means'))
+    assert abs(level_only.loc['sys', 'within_r2']) < 1e-9      # no tracking at all
+    assert level_only.loc['sys', 'between_r2'] > 0.999          # but perfect patient level
+
+
+def test_within_record_drops_short_records():
+    from src.evaluation import within_record_report
+    short = _fake_df(n_records=10, windows=3, seed=1)
+    long_ = _fake_df(n_records=5, windows=10, seed=2)
+    long_['record_id'] = 'long:' + long_['record_id']
+    both = pd.concat([short, long_], ignore_index=True)
+    assert within_record_report(both, _preds(both, 'perfect'), min_windows=5).loc['sys', 'n_records'] == 5
+
+    none = within_record_report(short, _preds(short, 'perfect'), min_windows=5)
+    assert none.loc['sys', 'n_records'] == 0 and none['within_r2'].isna().all()
