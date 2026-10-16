@@ -91,6 +91,25 @@ def cross_validate(model, df, features, n_splits=5, group_by='file'):
     return cv_summary(df, oof, oof_dummy, fold_id)
 
 
+def per_file_report(df, oof, oof_dummy):
+    """Leave-one-file-out view: for each file, model MAE vs the mean-predictor.
+
+    gain = dummy MAE - model MAE (positive = the model beats predicting the mean).
+    The spread of gain across files and the number of files with gain > 0 say how
+    reliable the model is; a single pooled number hides that.
+    """
+    y = df[TARGETS].to_numpy()
+    rows = []
+    for f, idx in df.groupby('file').indices.items():
+        row = {'file': f, 'n_windows': len(idx)}
+        for j, t in enumerate(TARGETS):
+            mae = np.abs(oof[idx, j] - y[idx, j]).mean()
+            dummy = np.abs(oof_dummy[idx, j] - y[idx, j]).mean()
+            row.update({f'{t}_mae': mae, f'{t}_dummy': dummy, f'{t}_gain': dummy - mae})
+        rows.append(row)
+    return pd.DataFrame(rows).set_index('file')
+
+
 def within_record_report(df, pred, min_windows=5):
     """Split model skill into 'which patient is this' vs 'does it track BP changes'.
 

@@ -76,3 +76,13 @@ def test_default_cv_never_splits_a_file_across_folds():
     d, _, _, fold_id = oof_predictions(LinearRegression(), df, ['bpm'])
     assert (pd.Series(fold_id).groupby(d['record_id']).nunique() == 1).all()  # so is each record
     assert (pd.Series(fold_id).groupby(d['file']).nunique() == 1).all()       # each file in exactly one fold
+
+
+def test_lofo_every_file_predicted_once_and_report_shape():
+    from src.evaluation import oof_predictions, per_file_report
+    df = _fake_df()
+    d, oof, oof_dummy, fold_id = oof_predictions(LinearRegression(), df, ['bpm'], n_splits=df['file'].nunique())
+    assert len(np.unique(fold_id)) == df['file'].nunique()           # one fold per file
+    pf = per_file_report(d, oof, oof_dummy)
+    assert len(pf) == df['file'].nunique() and {'sys_gain', 'dia_gain'} <= set(pf.columns)
+    assert np.allclose(pf['sys_gain'], pf['sys_dummy'] - pf['sys_mae'])
