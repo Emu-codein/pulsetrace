@@ -73,13 +73,18 @@ def oof_predictions(model, df, features, n_splits=5):
     return df, oof, oof_dummy, fold_id
 
 
+def cv_summary(df, oof, oof_dummy, fold_id):
+    """(report, per-fold MAE) from out-of-fold predictions."""
+    y = df[TARGETS].to_numpy()
+    fold_mae = pd.DataFrame([np.abs(oof[fold_id == k] - y[fold_id == k]).mean(axis=0)
+                             for k in np.unique(fold_id)], columns=TARGETS)
+    return report(y, oof, oof_dummy), fold_mae
+
+
 def cross_validate(model, df, features, n_splits=5):
     """GroupKFold on record_id over the training data. Returns (report, fold MAEs)."""
     df, oof, oof_dummy, fold_id = oof_predictions(model, df, features, n_splits)
-    y = df[TARGETS].to_numpy()
-    fold_mae = pd.DataFrame([np.abs(oof[fold_id == k] - y[fold_id == k]).mean(axis=0)
-                             for k in range(n_splits)], columns=TARGETS)
-    return report(y, oof, oof_dummy), fold_mae
+    return cv_summary(df, oof, oof_dummy, fold_id)
 
 
 def within_record_report(df, pred, min_windows=5):
