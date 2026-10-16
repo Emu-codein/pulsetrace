@@ -86,3 +86,20 @@ def test_lofo_every_file_predicted_once_and_report_shape():
     pf = per_file_report(d, oof, oof_dummy)
     assert len(pf) == df['file'].nunique() and {'sys_gain', 'dia_gain'} <= set(pf.columns)
     assert np.allclose(pf['sys_gain'], pf['sys_dummy'] - pf['sys_mae'])
+
+
+def test_stable_features_keeps_consistent_sign_only():
+    from src.run_stability import stable_features
+    rng = np.random.default_rng(0)
+    rows = []
+    for f in range(10):
+        n = 400
+        sys_ = rng.normal(130, 15, n)
+        rows.append(pd.DataFrame({
+            'file': f'part_{f}.mat', 'sys': sys_,
+            'stable': -0.5 * (sys_ - 130) / 15 + rng.normal(0, 1, n),            # always negative
+            'flips': (1 if f % 2 else -1) * 0.5 * (sys_ - 130) / 15 + rng.normal(0, 1, n),  # sign flips by file
+            'noise': rng.normal(0, 1, n),
+        }))
+    df = pd.concat(rows, ignore_index=True)
+    assert stable_features(df, ['stable', 'flips', 'noise'], 'sys') == ['stable']

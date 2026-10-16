@@ -14,9 +14,8 @@ from src.evaluation import (TARGETS, cv_summary, load_clean, oof_predictions,
 from src.run_ladder import ALL_FEATURES, FEATURE_SETS, _git_commit, forest, ridge, xgb
 
 
-def run(name, model, feature_set, df):
-    feats = FEATURE_SETS[feature_set]
-    d, oof, oof_dummy, fold_id = oof_predictions(model, df, feats, n_splits=df['file'].nunique())
+def log_lofo(run_name, model_name, feature_label, d, oof, oof_dummy, fold_id, params=None):
+    """Summarise out-of-file predictions, log to MLflow, return (metrics, per-file report)."""
     rep, _ = cv_summary(d, oof, oof_dummy, fold_id)
     pf = per_file_report(d, oof, oof_dummy)
     wr = within_record_report(d, oof)
@@ -28,12 +27,27 @@ def run(name, model, feature_set, df):
                   f'lofo_{t}_gain_mean': pf[f'{t}_gain'].mean(), f'lofo_{t}_gain_std': pf[f'{t}_gain'].std(),
                   f'lofo_{t}_files_better': int((pf[f'{t}_gain'] > 0).sum()),
                   f'within_{t}_r': wr.loc[t, 'within_r'], f'between_{t}_r': wr.loc[t, 'between_r']})
-    with mlflow.start_run(run_name=f'{name}:{feature_set}'):
-        mlflow.log_params({'model': name, 'feature_set': feature_set, 'features': ','.join(feats),
-                           'cv': 'leave-one-file-out'})
+    with mlflow.start_run(run_name=run_name):
+        mlflow.log_params({'model': model_name, 'feature_set': feature_label,
+                           'cv': 'leave-one-file-out', **(params or {})})
         mlflow.log_metrics({k: float(v) for k, v in m.items()})
         mlflow.set_tags({'git_commit': _git_commit(), 'stage': 'lofo'})
     return m, pf
+
+
+def print_line(label, m):
+    print(f"{label:30s} sys MAE {m['lofo_sys_mae']:.2f} (dummy {m['lofo_sys_mae_dummy']:.2f}) "
+          f"gain {m['lofo_sys_gain_mean']:+.2f}+-{m['lofo_sys_gain_std']:.2f} wins {m['lofo_sys_files_better']}/{m['n_files']} | "
+          f"dia MAE {m['lofo_dia_mae']:.2f} (dummy {m['lofo_dia_mae_dummy']:.2f}) "
+          f"gain {m['lofo_dia_gain_mean']:+.2f}+-{m['lofo_dia_gain_std']:.2f} wins {m['lofo_dia_files_better']}/{m['n_files']}",
+          flush=True)
+
+
+def run(name, model, feature_set, df):
+    feats = FEATURE_SETS[feature_set]
+    d, oof, oof_dummy, fold_id = oof_predictions(model, df, feats, n_splits=df['file'].nunique())
+    return log_lofo(f'{name}:{feature_set}', name, feature_set, d, oof, oof_dummy, fold_id,
+                    {'features': ','.join(feats)})
 
 
 def main():
@@ -46,11 +60,7 @@ def main():
     for name, model, fs in plan:
         m, pf = run(name, model, fs, df)
         per_file[f'{name}:{fs}'] = pf
-        print(f"{name+':'+fs:24s} sys MAE {m['lofo_sys_mae']:.2f} (dummy {m['lofo_sys_mae_dummy']:.2f}) "
-              f"gain {m['lofo_sys_gain_mean']:+.2f}±{m['lofo_sys_gain_std']:.2f} wins {m['lofo_sys_files_better']}/{m['n_files']} | "
-              f"dia MAE {m['lofo_dia_mae']:.2f} (dummy {m['lofo_dia_mae_dummy']:.2f}) "
-              f"gain {m['lofo_dia_gain_mean']:+.2f}±{m['lofo_dia_gain_std']:.2f} wins {m['lofo_dia_files_better']}/{m['n_files']}",
-              flush=True)
+        print_line(f'{name}:{fs}', m)
     best = per_file['xgb-d3:hr+ptt+morph']
     pd.set_option('display.width', 200)
     print('\nper-file detail, xgb-d3 (gain = dummy MAE - model MAE):')
