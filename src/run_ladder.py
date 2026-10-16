@@ -1,6 +1,6 @@
 """Model ladder: Ridge -> RandomForest -> XGBoost, each run logged to MLflow.
 
-    python -m src.run_ladder            # grouped CV on the training files only
+    python -m src.run_ladder            # grouped CV (by file) on the training files only
 
 All runs use the SAME rows (windows where every feature exists), so differences
 come from the model/features, not from which rows survived. The held-out test
@@ -31,6 +31,7 @@ FEATURE_SETS = {
     'hr+ptt+morph': BASE + PTT + MORPH,
 }
 ALL_FEATURES = FEATURE_SETS['hr+ptt+morph']
+CV_GROUP = 'file'  # 'record_id' leaks patients across folds, see src/evaluation.py
 
 
 def ridge():
@@ -56,10 +57,10 @@ def _git_commit():
         return 'unknown'
 
 
-def log_run(run_name, model, feature_set, df, params=None):
+def log_run(run_name, model, feature_set, df, params=None, group_by=CV_GROUP):
     """Grouped CV for one (model, feature set); log params + metrics to MLflow."""
     feats = FEATURE_SETS[feature_set]
-    d, oof, oof_dummy, fold_id = oof_predictions(model, df, feats)
+    d, oof, oof_dummy, fold_id = oof_predictions(model, df, feats, group_by=group_by)
     rep, fold_mae = cv_summary(d, oof, oof_dummy, fold_id)
     wr = within_record_report(d, oof)
 
@@ -74,14 +75,14 @@ def log_run(run_name, model, feature_set, df, params=None):
     with mlflow.start_run(run_name=run_name):
         mlflow.log_params({'model': run_name.split(':')[0], 'feature_set': feature_set,
                            'n_features': len(feats), 'features': ','.join(feats),
-                           'cv': 'GroupKFold(5) by record_id', **(params or {})})
+                           'cv': f'GroupKFold(5) by {group_by}', **(params or {})})
         mlflow.log_metrics({k: float(v) for k, v in metrics.items()})
-        mlflow.set_tags({'git_commit': _git_commit(), 'stage': 'cv'})
+        mlflow.set_tags({'git_commit': _git_commit(), 'stage': 'cv', 'cv_group': group_by})
     return {'run': run_name, 'feature_set': feature_set, **metrics}
 
 
 def main():
-    mlflow.set_experiment('pulsetrace-ladder')
+    mlflow.set_experiment('pulsetrace-ladder-by-file')
     train, _ = split_train_test(load_clean())
     train = train.dropna(subset=ALL_FEATURES)  # identical rows for every run
 

@@ -51,8 +51,12 @@ def report(y_true, y_pred, y_dummy):
     return pd.DataFrame(rows).T
 
 
-def oof_predictions(model, df, features, n_splits=5):
-    """Out-of-fold predictions via GroupKFold on record_id.
+def oof_predictions(model, df, features, n_splits=5, group_by='file'):
+    """Out-of-fold predictions via GroupKFold on `group_by`.
+
+    group_by='file' (default) leaves whole source files out per fold. Grouping by
+    record_id alone leaks: records of the same patient land in both train and
+    validation folds, which inflated CV (SBP R2 0.40 in CV vs 0.08 on held-out files).
 
     Returns (df_used, oof, oof_dummy, fold_id); rows with NaN features are dropped,
     so always use the returned df_used to line things up with the predictions.
@@ -60,13 +64,13 @@ def oof_predictions(model, df, features, n_splits=5):
     df = df.dropna(subset=features).reset_index(drop=True)
     X = df[features].to_numpy()
     y = df[TARGETS].to_numpy()
-    groups = df['record_id'].to_numpy()
+    groups = df[group_by].to_numpy()
 
     oof = np.empty_like(y, dtype=float)
     oof_dummy = np.empty_like(y, dtype=float)
     fold_id = np.empty(len(df), dtype=int)
     for k, (tr, va) in enumerate(GroupKFold(n_splits=n_splits).split(X, y, groups)):
-        assert set(groups[tr]).isdisjoint(groups[va]), 'record leaked across folds'
+        assert set(groups[tr]).isdisjoint(groups[va]), f'{group_by} leaked across folds'
         oof[va] = clone(model).fit(X[tr], y[tr]).predict(X[va])
         oof_dummy[va] = DummyRegressor(strategy='mean').fit(X[tr], y[tr]).predict(X[va])
         fold_id[va] = k
@@ -81,9 +85,9 @@ def cv_summary(df, oof, oof_dummy, fold_id):
     return report(y, oof, oof_dummy), fold_mae
 
 
-def cross_validate(model, df, features, n_splits=5):
-    """GroupKFold on record_id over the training data. Returns (report, fold MAEs)."""
-    df, oof, oof_dummy, fold_id = oof_predictions(model, df, features, n_splits)
+def cross_validate(model, df, features, n_splits=5, group_by='file'):
+    """GroupKFold over the training data. Returns (report, fold MAEs)."""
+    df, oof, oof_dummy, fold_id = oof_predictions(model, df, features, n_splits, group_by)
     return cv_summary(df, oof, oof_dummy, fold_id)
 
 

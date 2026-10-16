@@ -8,10 +8,12 @@ from src.evaluation import cross_validate, report
 
 def _fake_df(n_records=40, windows=25, seed=0):
     rng = np.random.default_rng(seed)
-    rid = np.repeat([f'part_1.mat:{i}' for i in range(n_records)], windows)
+    rid = np.repeat([f'part_{i % 8}.mat:{i}' for i in range(n_records)], windows)
+    file = np.repeat([f'part_{i % 8}.mat' for i in range(n_records)], windows)
     level = np.repeat(rng.normal(130, 20, n_records), windows)  # per-record BP level
     return pd.DataFrame({
         'record_id': rid,
+        'file': file,
         'bpm': rng.normal(80, 10, len(rid)),
         'sys': level + rng.normal(0, 2, len(rid)),
         'dia': level / 2 + rng.normal(0, 2, len(rid)),
@@ -66,3 +68,11 @@ def test_within_record_drops_short_records():
 
     none = within_record_report(short, _preds(short, 'perfect'), min_windows=5)
     assert none.loc['sys', 'n_records'] == 0 and none['within_r2'].isna().all()
+
+
+def test_default_cv_never_splits_a_file_across_folds():
+    from src.evaluation import oof_predictions
+    df = _fake_df()
+    d, _, _, fold_id = oof_predictions(LinearRegression(), df, ['bpm'])
+    assert (pd.Series(fold_id).groupby(d['record_id']).nunique() == 1).all()  # so is each record
+    assert (pd.Series(fold_id).groupby(d['file']).nunique() == 1).all()       # each file in exactly one fold
